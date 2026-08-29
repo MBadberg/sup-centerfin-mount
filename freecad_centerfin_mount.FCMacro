@@ -1,321 +1,371 @@
-# =============================================================================
-# FreeCAD Macro: Strap-Mounted Slide-In Fin Box (T-Profil)
-# =============================================================================
-# FIXED VERSION: Simplified T-shape, proper visibility
-# Material: ABS (FDM 3D-Druck)
-# =============================================================================
+import os
 
 import FreeCAD as App
-import FreeCADGui as Gui
 from FreeCAD import Vector
 import Part
+import Mesh
 
-print("\n" + "="*75)
-print("  STARTING FIN BOX MACRO")
-print("="*75 + "\n")
+try:
+    import FreeCADGui as Gui
+except Exception:
+    Gui = None
 
-# =============================================================================
-# ======================== PARAMETRISCHE MASSE ==============================
-# =============================================================================
+try:
+    from PySide import QtGui
+except Exception:
+    QtGui = None
 
-# --- Finnen-Schiene (Standard Slide-In Masse) ---
-fin_blade_length = 185.0         # Länge des Finnenblatts
-fin_blade_width = 35.0           # Breite des Finnenblatts
-fin_blade_height = 10.0          # Höhe des Finnenblatts
 
-# --- Flansch (T-Form oben) ---
-flansch_width = 36.0             # Breite des Flansches
-flansch_length = 36.0            # Länge des Flansches
-flansch_thickness = 2.5          # Dicke des Flansches
+print("\n" + "=" * 75)
+print("  STARTING FIN NEGATIVE HOLDER MACRO")
+print("=" * 75 + "\n")
 
-# --- Fin-Box (Kasten) ---
-box_length = fin_blade_length + 10.0
-box_width = fin_blade_width + 12.0
-box_height = flansch_thickness + fin_blade_height + 8.0
-box_wall_thickness = 5.0
-box_bottom_thickness = 5.0
 
-# --- Mount Base ---
-base_length = 110.0
-base_width = 170.0
-base_thickness = 9.0
-base_corner_radius = 10.0
+# -----------------------------------------------------------------------------
+# Parameter
+# -----------------------------------------------------------------------------
 
-# --- Strap Slots ---
-strap_slot_width = 32.0
-strap_slot_depth = 6.0
-strap_front_pos = 20.0
-strap_rear_pos = base_length - 20.0
+fin_stl_path = ""
+mesh_tolerance = 0.10
+fit_clearance = 0.35
 
-# --- Security Pin ---
-pin_diameter = 6.5
-pin_hole_diameter = pin_diameter + 0.5
+shell_wall = 7.0
+shell_back_wall = 9.0
+shell_top_wall = 8.0
+shell_bottom_wall = 8.0
 
-# --- Ribs ---
-rib_thickness = 6.0
-rib_height = 10.0
+base_margin_x = 20.0
+base_margin_y = 34.0
+base_thickness = 8.0
 
-# =============================================================================
-# ======================== HILFSFUNKTIONEN =================================
-# =============================================================================
+strap_slot_length = 38.0
+strap_slot_width = 8.0
+strap_slot_margin = 18.0
 
-def create_document():
-    """Erstelle neues Dokument"""
-    try:
-        doc = App.activeDocument()
-        if doc:
-            for obj in list(doc.Objects):
-                doc.removeObject(obj.Name)
-    except:
-        pass
-    doc = App.newDocument("FinBoxMount")
-    print("✓ Dokument erstellt\n")
+pin_hole_diameter = 6.5
+pin_x_ratio = 0.24
+pin_z_ratio = 0.72
+
+rib_width = 18.0
+rib_depth = 10.0
+
+outer_fillet = 4.0
+base_fillet = 6.0
+opening_fillet = 2.0
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+def macro_dir():
+    path = globals().get("__file__", "")
+    if path:
+        return os.path.dirname(os.path.abspath(path))
+    return os.getcwd()
+
+
+def create_document(name):
+    existing = App.ActiveDocument
+    if existing is not None:
+        App.closeDocument(existing.Name)
+    doc = App.newDocument(name)
+    print("✓ Dokument erstellt: %s" % doc.Name)
     return doc
 
-def safe_fillet(shape, radius, edges):
-    """Sichere Fillet-Operation"""
-    if not edges or radius <= 0:
+
+def safe_fillet(shape, radius, edge_filter=None):
+    if radius <= 0:
         return shape
+
     try:
+        edges = [edge for edge in shape.Edges if edge_filter is None or edge_filter(edge)]
+        if not edges:
+            return shape
         return shape.makeFillet(radius, edges)
-    except Exception as e:
-        print(f"  ⚠ Fillet fehlgeschlagen: {e}")
+    except Exception as exc:
+        print("  ⚠ Fillet fehlgeschlagen: %s" % exc)
         return shape
 
-# =============================================================================
-# ======================== GEOMETRIE-ERSTELLUNG ============================
-# =============================================================================
 
-print("Erstelle Geometrie-Komponenten...\n")
+def translated_copy(shape, vector):
+    result = shape.copy()
+    result.translate(vector)
+    return result
 
-def create_base():
-    """Basis-Platte"""
-    print("  1. Base-Platte...")
-    base = Part.makeBox(base_length, base_width, base_thickness, Vector(0, 0, 0))
-    
-    # Oben abrunden
-    edges = [e for e in base.Edges if e.BoundBox.ZMax > base_thickness - 0.5]
-    base = safe_fillet(base, base_corner_radius, edges)
-    
-    return base
 
-def create_fin_box():
-    """T-förmiger Finnenkasten"""
-    print("  2. Finnenkasten (T-Form)...")
-    
-    box_x = (base_length - box_length) / 2.0
-    box_y = (base_width - box_width) / 2.0
-    box_z = base_thickness
-    
-    # Äußeres Rechteck
-    outer = Part.makeBox(box_length, box_width, box_height, Vector(box_x, box_y, box_z))
-    
-    # Innere Hohlräume - OBEN: Flansch
-    flansch_cavity_x = box_x + (box_length - flansch_length) / 2.0
-    flansch_cavity_y = box_y + (box_width - flansch_width) / 2.0
-    flansch_cavity_z = box_z + box_height - flansch_thickness - 1.0
-    
-    flansch_cavity = Part.makeBox(
-        flansch_length + 1.0,
-        flansch_width + 1.0,
-        flansch_thickness + 1.0,
-        Vector(flansch_cavity_x, flansch_cavity_y, flansch_cavity_z)
+def ensure_short_axis_y(shape):
+    bbox = shape.BoundBox
+    lengths = {"X": bbox.XLength, "Y": bbox.YLength, "Z": bbox.ZLength}
+    shortest = min(lengths, key=lengths.get)
+
+    aligned = shape.copy()
+    if shortest == "X":
+        aligned.rotate(Vector(0, 0, 0), Vector(0, 0, 1), 90)
+    elif shortest == "Z":
+        aligned.rotate(Vector(0, 0, 0), Vector(1, 0, 0), -90)
+    return aligned
+
+
+def ensure_long_axis_z(shape):
+    bbox = shape.BoundBox
+    lengths = {"X": bbox.XLength, "Y": bbox.YLength, "Z": bbox.ZLength}
+    longest = max(lengths, key=lengths.get)
+
+    aligned = shape.copy()
+    if longest == "X":
+        aligned.rotate(Vector(0, 0, 0), Vector(0, 1, 0), 90)
+    return aligned
+
+
+def orient_fin(shape):
+    aligned = ensure_short_axis_y(shape)
+    aligned = ensure_long_axis_z(aligned)
+    bbox = aligned.BoundBox
+    return translated_copy(aligned, Vector(-bbox.XMin, -bbox.YMin, -bbox.ZMin))
+
+
+def find_fin_stl():
+    if fin_stl_path and os.path.isfile(fin_stl_path):
+        return fin_stl_path
+
+    search_root = macro_dir()
+    candidates = []
+    for name in os.listdir(search_root):
+        if name.lower().endswith(".stl"):
+            candidates.append(os.path.join(search_root, name))
+
+    if len(candidates) == 1:
+        print("✓ STL automatisch gefunden: %s" % candidates[0])
+        return candidates[0]
+
+    if Gui is not None and QtGui is not None:
+        selected, _ = QtGui.QFileDialog.getOpenFileName(
+            None,
+            "Finnen-STL auswählen (Thingiverse thing:2994255)",
+            search_root,
+            "STL Files (*.stl)",
+        )
+        if selected:
+            print("✓ STL ausgewählt: %s" % selected)
+            return selected
+
+    raise RuntimeError(
+        "Keine STL gefunden. Lade die Standard-Finne von thing:2994255 herunter "
+        "und lege die STL neben das Makro oder setze fin_stl_path."
     )
-    
-    # Innere Hohlräume - UNTEN: Blatt
-    blade_cavity_x = box_x + (box_length - fin_blade_length) / 2.0
-    blade_cavity_y = box_y + (box_width - fin_blade_width) / 2.0
-    blade_cavity_z = box_z + box_bottom_thickness
-    
-    blade_cavity = Part.makeBox(
-        fin_blade_length + 1.0,
-        fin_blade_width + 1.0,
-        fin_blade_height + 3.0,
-        Vector(blade_cavity_x, blade_cavity_y, blade_cavity_z)
-    )
-    
-    # Kombiniere Hohlräume
-    cavities = flansch_cavity.fuse(blade_cavity)
-    
-    # Schneide aus
-    shell = outer.cut(cavities)
-    
-    # Abrunden
-    edges = [e for e in shell.Edges if len(e.BoundBox.Center) > 0]
-    shell = safe_fillet(shell, 2.0, edges[:8] if len(edges) > 8 else edges)
-    
-    return shell
 
-def create_pin_hole():
-    """Sicherungsstift-Loch"""
-    print("  3. Security-Pin-Loch...")
-    
-    box_x = (base_length - box_length) / 2.0
-    box_y = (base_width - box_width) / 2.0
-    box_z = base_thickness
-    
-    pin_x = box_x + box_length / 2.0 - 45.0
-    pin_y = box_y - 1.0
-    pin_z = box_z + box_height / 2.0
-    
-    pin_hole = Part.makeCylinder(
+
+def load_fin_solid(stl_path):
+    print("Lade STL: %s" % stl_path)
+    mesh = Mesh.Mesh(stl_path)
+    if mesh.CountFacets == 0:
+        raise RuntimeError("Die STL enthält keine Flächen.")
+
+    shape = Part.Shape()
+    shape.makeShapeFromMesh(mesh.Topology, mesh_tolerance)
+    shell = Part.makeShell(shape.Faces)
+    solid = Part.makeSolid(shell)
+    return solid.removeSplitter()
+
+
+def expand_for_clearance(shape):
+    if fit_clearance <= 0:
+        return shape
+
+    try:
+        expanded = shape.makeOffsetShape(fit_clearance, 0.05, fill=True)
+        return expanded.removeSplitter()
+    except Exception as exc:
+        print("  ⚠ Offset für Passspiel fehlgeschlagen, nutze exakte STL: %s" % exc)
+        return shape
+
+
+def make_slot(center_x, center_y, total_length, total_width, cut_height):
+    radius = total_width / 2.0
+    straight = max(total_length - total_width, 0.0)
+
+    front = Part.makeCylinder(radius, cut_height, Vector(center_x, center_y - straight / 2.0, -1.0), Vector(0, 0, 1))
+    rear = Part.makeCylinder(radius, cut_height, Vector(center_x, center_y + straight / 2.0, -1.0), Vector(0, 0, 1))
+
+    if straight > 0:
+        bridge = Part.makeBox(
+            total_width,
+            straight,
+            cut_height,
+            Vector(center_x - radius, center_y - straight / 2.0, -1.0),
+        )
+        return front.fuse(rear).fuse(bridge)
+
+    return front.fuse(rear)
+
+
+def build_negative_holder(fin_cavity):
+    cavity_box = fin_cavity.BoundBox
+
+    shell_origin = Vector(
+        cavity_box.XMin - shell_wall,
+        cavity_box.YMin,
+        base_thickness,
+    )
+    shell = Part.makeBox(
+        cavity_box.XLength + (2.0 * shell_wall),
+        cavity_box.YLength + shell_back_wall,
+        cavity_box.ZLength + shell_top_wall + shell_bottom_wall,
+        shell_origin,
+    )
+
+    return shell.cut(fin_cavity)
+
+
+def build_base(shell_shape):
+    shell_box = shell_shape.BoundBox
+    base = Part.makeBox(
+        shell_box.XLength + (2.0 * base_margin_x),
+        shell_box.YLength + (2.0 * base_margin_y),
+        base_thickness,
+        Vector(shell_box.XMin - base_margin_x, shell_box.YMin - base_margin_y, 0),
+    )
+
+    return safe_fillet(
+        base,
+        base_fillet,
+        lambda edge: edge.BoundBox.ZMax >= base_thickness - 0.01,
+    )
+
+
+def build_ribs(shell_shape):
+    shell_box = shell_shape.BoundBox
+    base_box = final_base.BoundBox
+
+    left_rib = Part.makeBox(
+        rib_width,
+        rib_depth,
+        shell_box.ZLength * 0.45,
+        Vector(shell_box.XMin + shell_wall, shell_box.YMax, base_thickness),
+    )
+
+    right_rib = Part.makeBox(
+        rib_width,
+        rib_depth,
+        shell_box.ZLength * 0.45,
+        Vector(shell_box.XMax - shell_wall - rib_width, shell_box.YMax, base_thickness),
+    )
+
+    back_rib = Part.makeBox(
+        shell_box.XLength * 0.50,
+        rib_depth,
+        shell_box.ZLength * 0.28,
+        Vector(
+            shell_box.XMin + (shell_box.XLength * 0.25),
+            base_box.YMax - base_margin_y,
+            base_thickness,
+        ),
+    )
+
+    ribs = left_rib.fuse(right_rib).fuse(back_rib)
+    return safe_fillet(ribs, 2.0)
+
+
+def build_pin_hole(shell_shape, cavity_shape):
+    cavity_box = cavity_shape.BoundBox
+    shell_box = shell_shape.BoundBox
+
+    pin_x = cavity_box.XMin + (cavity_box.XLength * pin_x_ratio)
+    pin_z = cavity_box.ZMin + (cavity_box.ZLength * pin_z_ratio)
+
+    return Part.makeCylinder(
         pin_hole_diameter / 2.0,
-        box_width + 4.0,
-        Vector(pin_x, pin_y, pin_z),
-        Vector(0, 1, 0)
+        shell_box.YLength + 2.0,
+        Vector(pin_x, shell_box.YMin - 1.0, pin_z),
+        Vector(0, 1, 0),
     )
-    
-    return pin_hole
 
-def create_strap_slots():
-    """Gurtschlitze"""
-    print("  4. Gurtschlitze...")
-    
-    # Vorne
-    front = Part.makeBox(
-        strap_slot_width,
-        base_width + 4.0,
-        strap_slot_depth,
-        Vector(strap_front_pos - strap_slot_width/2.0, -2.0, base_thickness - strap_slot_depth)
-    )
-    
-    # Hinten
-    rear = Part.makeBox(
-        strap_slot_width,
-        base_width + 4.0,
-        strap_slot_depth,
-        Vector(strap_rear_pos - strap_slot_width/2.0, -2.0, base_thickness - strap_slot_depth)
-    )
-    
-    slots = front.fuse(rear)
-    return slots
 
-def create_ribs():
-    """Verstärkungsrippen"""
-    print("  5. Verstärkungsrippen...")
-    
-    box_x = (base_length - box_length) / 2.0
-    box_y = (base_width - box_width) / 2.0
-    box_z = base_thickness
-    
-    # Vorne
-    rib_front = Part.makeBox(
-        rib_thickness * 3.0,
-        rib_thickness * 2.5,
-        rib_height,
-        Vector(box_x + (box_length - rib_thickness*3.0)/2.0, box_y - rib_thickness*2.5, box_z)
-    )
-    
-    # Hinten
-    rib_rear = Part.makeBox(
-        rib_thickness * 3.0,
-        rib_thickness * 2.5,
-        rib_height,
-        Vector(box_x + (box_length - rib_thickness*3.0)/2.0, box_y + box_width, box_z)
-    )
-    
-    ribs = rib_front.fuse(rib_rear)
-    return ribs
+def build_strap_slots(base_shape):
+    base_box = base_shape.BoundBox
+    front_x = base_box.XMin + strap_slot_margin
+    rear_x = base_box.XMax - strap_slot_margin
+    center_y = base_box.Center.y
+    cut_height = base_box.ZLength + 2.0
 
-# =============================================================================
-# ======================== ASSEMBLY ==========================================
-# =============================================================================
+    front = make_slot(front_x, center_y, strap_slot_length, strap_slot_width, cut_height)
+    rear = make_slot(rear_x, center_y, strap_slot_length, strap_slot_width, cut_height)
+    return front.fuse(rear)
 
-print("\nAssembliere Komponenten...\n")
 
-base = create_base()
-print("  ✓ Base erstellt")
+# -----------------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------------
 
-fin_box = create_fin_box()
-print("  ✓ Finnenkasten erstellt")
+stl_path = find_fin_stl()
+fin_solid = orient_fin(load_fin_solid(stl_path))
+fin_cavity = expand_for_clearance(fin_solid)
 
-ribs = create_ribs()
-print("  ✓ Rippen erstellt")
+fin_bbox = fin_cavity.BoundBox
+fin_cavity = translated_copy(
+    fin_cavity,
+    Vector(shell_wall, 0, base_thickness + shell_bottom_wall),
+)
 
-pin_hole = create_pin_hole()
-print("  ✓ Pin-Loch erstellt")
+print("Erzeuge Negativ-Halter aus realer Finnenform...")
+holder_shell = build_negative_holder(fin_cavity)
+holder_shell = safe_fillet(
+    holder_shell,
+    outer_fillet,
+    lambda edge: edge.BoundBox.YMin >= holder_shell.BoundBox.YMax - shell_back_wall - 0.01,
+)
 
-strap_slots = create_strap_slots()
-print("  ✓ Gurtschlitze erstellt")
+opening_blend = safe_fillet(
+    holder_shell,
+    opening_fillet,
+    lambda edge: abs(edge.BoundBox.YMin - holder_shell.BoundBox.YMin) < 0.01,
+)
+holder_shell = opening_blend
 
-print("\nVerschmelze Teile...\n")
+final_base = build_base(holder_shell)
+ribs = build_ribs(holder_shell)
+pin_hole = build_pin_hole(holder_shell, fin_cavity)
+strap_slots = build_strap_slots(final_base)
 
-# Addiere
-print("  → Base + Kasten...")
-result = base.fuse(fin_box)
-
-print("  → + Rippen...")
-result = result.fuse(ribs)
-
-# Subtrahiere
-print("  → - Pin-Loch...")
+result = final_base.fuse(holder_shell).fuse(ribs)
 result = result.cut(pin_hole)
-
-print("  → - Gurtschlitze...")
 result = result.cut(strap_slots)
 
-print("  ✓ Assembly komplett\n")
 
-# =============================================================================
-# ======================== FreeCAD OBJEKT ===================================
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Document objects
+# -----------------------------------------------------------------------------
 
-print("Erstelle FreeCAD-Dokument...\n")
+doc = create_document("FinNegativeHolder")
 
-doc = create_document()
+part_obj = doc.addObject("Part::Feature", "FinNegativeHolder")
+part_obj.Shape = result
+part_obj.Label = "SUP Fin Negative Holder"
 
-print("  → Erstelle Part-Objekt...")
-obj = doc.addObject("Part::Feature", "FinBoxMount")
-obj.Shape = result
+reference_obj = doc.addObject("Part::Feature", "ReferenceFin")
+reference_obj.Shape = fin_cavity
+reference_obj.Label = "Reference Fin Cavity"
+reference_obj.ViewObject.Visibility = False
 
-print("  → Setze Eigenschaften...")
-obj.Visibility = True
-obj.ViewObject.Visibility = True
-obj.ViewObject.DisplayMode = "Flat Lines"
-obj.Label = "Strap-Mounted Slide-In Fin Box"
-
-print("  → Recompute...")
 doc.recompute()
 
-print("  ✓ Objekt erstellt und sichtbar\n")
+if Gui is not None:
+    try:
+        part_obj.ViewObject.DisplayMode = "Flat Lines"
+        part_obj.ViewObject.ShapeColor = (0.20, 0.45, 0.85)
+        Gui.SendMsgToActiveView("ViewFit")
+    except Exception as exc:
+        print("  ⚠ Ansicht konnte nicht angepasst werden: %s" % exc)
 
-# View
-try:
-    print("  → Passe Ansicht an...")
-    Gui.activeDocument().resetEdit()
-    Gui.SendMsgToActiveView("ViewFitAll")
-    print("  ✓ Ansicht angepasst\n")
-except Exception as e:
-    print(f"  ⚠ Ansicht-Fehler: {e}\n")
 
-# =============================================================================
-# ======================== INFO =============================================
-# =============================================================================
-
-print("="*75)
-print("  PARAMETRISCHE MASSE")
-print("="*75)
-print(f"\n  Finne:")
-print(f"    Länge: {fin_blade_length}mm | Breite: {fin_blade_width}mm | Höhe: {fin_blade_height}mm")
-print(f"\n  Flansch:")
-print(f"    Größe: {flansch_width}×{flansch_length}mm | Dicke: {flansch_thickness}mm")
-print(f"\n  Fin-Box:")
-print(f"    Länge: {box_length}mm | Breite: {box_width}mm | Höhe: {box_height}mm")
-print(f"    Wände: {box_wall_thickness}mm | Boden: {box_bottom_thickness}mm")
-print(f"\n  Base:")
-print(f"    Länge: {base_length}mm | Breite: {base_width}mm | Dicke: {base_thickness}mm")
-print(f"\n  Gurtschlitze:")
-print(f"    Vorne: {strap_front_pos}mm | Hinten: {strap_rear_pos}mm")
-print(f"    Breite: {strap_slot_width}mm | Tiefe: {strap_slot_depth}mm")
-print(f"\n  Security-Pin:")
-print(f"    Durchmesser: {pin_hole_diameter}mm")
-print("\n" + "="*75)
-print("  EXPORT")
-print("="*75)
-print("\n  ✓ Modell ist sichtbar im Viewport!")
-print("  1. Rechtsklick auf 'FinBoxMount' im Tree")
-print("  2. 'Export as STL' wählen")
-print("  3. STL-Datei speichern")
-print("\n" + "="*75)
-print("  ✅ FERTIG!")
-print("="*75 + "\n")
+print("\n" + "=" * 75)
+print("  PARAMETER")
+print("=" * 75)
+print("STL: %s" % stl_path)
+print("Fit clearance: %.2f mm" % fit_clearance)
+print("Pin hole diameter: %.2f mm" % pin_hole_diameter)
+print("Strap slot size: %.2f x %.2f mm" % (strap_slot_length, strap_slot_width))
+print("Fin bounding box: %.2f x %.2f x %.2f mm" % (fin_bbox.XLength, fin_bbox.YLength, fin_bbox.ZLength))
+print("✓ Fertig: Negativ-Halter erzeugt und im Dokument angezeigt.")
+print("=" * 75 + "\n")
