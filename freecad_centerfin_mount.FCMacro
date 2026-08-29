@@ -1,10 +1,9 @@
 # =============================================================================
-# FreeCAD Macro: Strap-Mounted Slide-In Center Fin Mount for SUP/iSUP
+# FreeCAD Macro: Strap-Mounted Slide-In Fin Box for SUP/iSUP
 # =============================================================================
+# CORRECT VERSION: Proper Fin Box (Steckfinne) Construction
 # Material: ABS (FDM 3D-Druck)
-# Purpose: Generate complete 3D model for 3D-printing
-# Author: Copilot
-# BUGFIX: Sichtbarkeit und korrekte Shape-Konvertierung
+# Purpose: Removable fin box mounted with 2 cross straps
 # =============================================================================
 
 import FreeCAD as App
@@ -16,49 +15,52 @@ import Part
 # ======================== PARAMETRISCHE MASSE ==============================
 # =============================================================================
 
-# --- Slide-In Fin Schiene (Standardmaße) ---
-fin_rail_length = 185.0          # Basis-Länge (18,0-18,5 cm)
-fin_rail_width = 35.0            # Gesamtbreite Schiene (3,3-3,5 cm)
-fin_rail_height = 10.0           # Gesamthöhe der Schiene
-fin_top_groove_width = 4.3       # Oberster Steg - EXAKT für Finnenaufnahme
-fin_insertion_play = 0.3         # Spieltoleranz
-fin_bottom_width = 33.0          # Breite der unteren Schiene
-fin_bottom_height = 6.0          # Höhe der unteren Schiene
+# --- Fin Rail (Schiene an der Finne) - STANDARD MASSE ---
+fin_rail_length = 185.0          # Länge der Finne-Schiene (180-190mm)
+fin_rail_width = 35.0            # Breite der Finne-Schiene (33-37mm) 
+fin_rail_height = 10.0           # Höhe der Finne-Schiene (ca. 10mm)
+fin_rail_top_width = 4.3         # Oberste Nut-Breite (exakt!)
 
-# --- Sicherungspin ---
-security_pin_diameter = 6.5      # Durchmesser Sicherungspin
-security_pin_pos_from_front = 45.0  # Position von vorne
+# --- Fin Box (Kasten - das, was wir bauen) ---
+fin_box_length = fin_rail_length + 8.0      # Kasten-Länge (mit Puffer)
+fin_box_width = fin_rail_width + 8.0        # Kasten-Breite (mit Wänden)
+fin_box_height = fin_rail_height + 5.0      # Kasten-Höhe (mit Boden + Platz)
+fin_box_bottom_thickness = 3.0              # Dicke des Bodens
+fin_box_wall_thickness = 4.0                # Wanddicke (ABS-robust)
+fin_box_inner_clearance = 0.5               # Spielraum innen
 
-# --- Base/Mount-Platte ---
-base_length_along_board = 95.0   # Längsrichtung SUP (vorne-hinten)
-base_width_cross_board = 140.0   # Querrichtung SUP (links-rechts)
-base_height = 12.0               # Dicke der Baseplatte
-base_corner_radius = 8.0         # Abgerundete Ecken
+# --- Sicherungsstift ---
+security_pin_diameter = 6.5                 # Durchmesser (Standard)
+security_pin_pos_from_front = 45.0         # Position von vorne (mm)
 
-# --- Gurtführungen ---
-strap_width_max = 30.0           # Max Gurtbreite
-strap_slot_width = 32.0          # Schlitzbreite (30 + Spiel)
-strap_slot_height = 8.0          # Schlitzhöhe
-strap_slot_corner_radius = 2.5   # Radien an Ecken der Schlitze
-strap_position_front = 20.0      # Vordere Gurtführung von vorne
-strap_position_rear = 155.0      # Hintere Gurtführung von vorne
-strap_reinforcement_width = 15.0 # Verstärkung um Gurtschlitze
+# --- Mount Base (Auflageplatte auf SUP) ---
+base_length = 105.0                         # Länge (Vorne-Hinten auf Board)
+base_width = 160.0                          # Breite (Quer auf Board) 
+base_thickness = 8.0                        # Dicke der Baseplatte
+base_corner_radius = 10.0                   # Abgerundete Ecken
 
-# --- Wandstärken für ABS ---
-base_wall_thickness = 5.0        # Baseplatte Wandstärke
-fin_mount_wall_thickness = 7.0   # Finnenaufnahme Wandstärke
-rib_thickness = 6.0              # Verstärkungsrippen Dicke
-rib_height = 12.0                # Verstärkungsrippen Höhe
+# --- Strap Guides (Gurtführungen) ---
+strap_width = 30.0                          # Gurt-Breite (max 30mm)
+strap_slot_width = 32.0                     # Schlitz-Breite (30 + Spiel)
+strap_slot_depth = 6.0                      # Schlitz-Tiefe (Führungstiefe)
+strap_slot_radius = 2.5                     # Radien in den Schlitzen
+strap_front_pos = 18.0                      # Vordere Gurtführung (von vorne)
+strap_rear_pos = base_length - 18.0         # Hintere Gurtführung (von hinten)
 
-# --- Toleranzen ---
-printing_tolerance = 0.2         # Drucktoleranzen ausgleichen
+# --- Ribs & Reinforcements ---
+rib_thickness = 5.0                         # Rippen-Dicke
+rib_height = 8.0                            # Rippen-Höhe
+rib_count = 2                                # Anzahl Verstärkungsrippen
+
+# --- Material Toleranzen ---
+print_tolerance = 0.2                       # 3D-Druck Toleranz
 
 # =============================================================================
 # ======================== HILFSFUNKTIONEN =================================
 # =============================================================================
 
 def create_document():
-    """Erstelle oder leere existierendes Dokument"""
+    """Erstelle frisches Dokument"""
     try:
         doc = App.activeDocument()
         if doc:
@@ -66,218 +68,270 @@ def create_document():
                 doc.removeObject(obj.Name)
     except:
         pass
-    doc = App.newDocument("CenterfintMount")
+    doc = App.newDocument("FinBoxMount")
     return doc
 
-def make_shape_visible(obj):
-    """Mache ein Objekt sichtbar und setze Properties"""
-    obj.Visibility = True
-    if hasattr(obj, 'ViewObject'):
-        obj.ViewObject.Visibility = True
-    return obj
+def create_rounded_box(length, width, height, position, corner_radius=2.0):
+    """Erstelle Box mit abgerundeten Kanten"""
+    box = Part.makeBox(length, width, height, position)
+    
+    # Finde Top-Kanten
+    edges = [e for e in box.Edges if e.BoundBox.ZMax > height - 0.5]
+    
+    if edges and corner_radius > 0:
+        try:
+            box = box.makeFillet(corner_radius, edges)
+        except:
+            pass  # Wenn Fillet fehlschlägt, verwende Box ohne Fillet
+    
+    return box
 
 # =============================================================================
 # ======================== GEOMETRIE-ERSTELLUNG ============================
 # =============================================================================
 
-def create_base_plate(doc):
-    """Erstelle die Basis-Platte mit abgerundeten Ecken"""
+def create_base_plate():
+    """Erstelle die Auflageplatte (unter dem Finnenkasten)"""
     print("  → Erstelle Base-Platte...")
     
-    # Rechteck mit abgerundeten Ecken
-    base_box = Part.makeBox(
-        base_length_along_board,
-        base_width_cross_board,
-        base_height,
+    # Rechteckige Platte mit abgerundeten Ecken
+    base = Part.makeBox(
+        base_length,
+        base_width,
+        base_thickness,
         Vector(0, 0, 0)
     )
     
-    # Ecken oben abrunden
-    edges = base_box.Edges
-    edge_list = []
-    for edge in edges:
-        if edge.BoundBox.ZMax > base_height - 1:
-            edge_list.append(edge)
+    # Abgerundete Ecken oben
+    edges = [e for e in base.Edges if e.BoundBox.ZMax > base_thickness - 0.5]
+    if edges:
+        try:
+            base = base.makeFillet(base_corner_radius, edges)
+        except:
+            pass
     
-    if edge_list:
-        base_shape = base_box.makeFillet(base_corner_radius, edge_list)
-    else:
-        base_shape = base_box
-    
-    return base_shape
+    return base
 
-def create_fin_mount_shell(doc):
-    """Erstelle die Finnenaufnahme-Schale"""
-    print("  → Erstelle Finnenaufnahme...")
+def create_fin_box_shell():
+    """Erstelle die Finnenkasten-Schale (oben offen!)"""
+    print("  → Erstelle Finnenkasten-Gehäuse...")
     
-    outer_length = fin_rail_length + 6.0
-    outer_width = fin_rail_width + 2 * fin_mount_wall_thickness
-    outer_height = fin_rail_height + 2.0
+    # Der Kasten sitzt oben auf der Base
+    box_height_total = fin_box_height
     
-    mount_x_center = base_length_along_board / 2.0
-    mount_y_center = base_width_cross_board / 2.0
-    
+    # Äußeres Rechteck
     outer_box = Part.makeBox(
-        outer_length,
-        outer_width,
-        outer_height,
-        Vector(mount_x_center - outer_length/2.0, 
-               mount_y_center - outer_width/2.0, 
-               base_height)
+        fin_box_length,
+        fin_box_width,
+        box_height_total,
+        Vector(
+            (base_length - fin_box_length) / 2.0,  # Zentriert auf Base
+            (base_width - fin_box_width) / 2.0,     # Zentriert auf Base
+            base_thickness                           # Sitzt auf der Base
+        )
     )
     
-    inner_length = fin_rail_length
-    inner_width = fin_rail_width + fin_insertion_play
-    inner_height = fin_rail_height + 1.0
+    # Inneres Rechteck (wird ausgehöhlt) - OBEN OFFEN!
+    inner_length = fin_rail_length + fin_box_inner_clearance
+    inner_width = fin_rail_width + fin_box_inner_clearance
+    inner_height = box_height_total - fin_box_bottom_thickness
+    
+    inner_pos_x = (base_length - fin_box_length) / 2.0 + fin_box_wall_thickness
+    inner_pos_y = (base_width - fin_box_width) / 2.0 + fin_box_wall_thickness
+    inner_pos_z = base_thickness + fin_box_bottom_thickness
     
     inner_box = Part.makeBox(
         inner_length,
         inner_width,
         inner_height,
-        Vector(mount_x_center - inner_length/2.0,
-               mount_y_center - inner_width/2.0,
-               base_height + 1.0)
+        Vector(inner_pos_x, inner_pos_y, inner_pos_z)
     )
     
+    # Schale = Äußeres minus Inneres
     shell = outer_box.cut(inner_box)
+    
     return shell
 
-def create_fin_slot_groove(doc):
-    """Erstelle die Führungsnut für die Finnenaufnahme"""
-    print("  → Erstelle Finnen-Führungsnut...")
+def create_fin_guides():
+    """Erstelle interne Führungsleisten für die Finne"""
+    print("  → Erstelle Finnen-Führungen...")
     
-    mount_x_center = base_length_along_board / 2.0
-    mount_y_center = base_width_cross_board / 2.0
+    # Die Finne sitzt in einer Nut in der Mitte des Kastens
+    # Wir machen 2 Führungsleisten (oben und unten) für die Finne-Schiene
     
-    groove_length = fin_rail_length
-    groove_width = fin_top_groove_width + fin_insertion_play
-    groove_depth = 3.0
+    guide_width = fin_box_wall_thickness / 2.0
+    guide_height = fin_rail_height / 2.0
+    guide_length = fin_rail_length + 2.0
     
-    groove_box = Part.makeBox(
-        groove_length,
-        groove_width,
-        groove_depth,
-        Vector(mount_x_center - groove_length/2.0,
-               mount_y_center - groove_width/2.0,
-               base_height + fin_rail_height - 1.0)
+    box_center_x = (base_length - fin_box_length) / 2.0
+    box_center_y = (base_width - fin_box_width) / 2.0
+    
+    # Vordere Führungsleiste (unten im Kasten)
+    guide_front = Part.makeBox(
+        guide_length,
+        fin_box_wall_thickness,
+        guide_height,
+        Vector(
+            box_center_x + (fin_box_length - guide_length) / 2.0,
+            box_center_y + fin_box_wall_thickness - 1.0,
+            base_thickness + fin_box_bottom_thickness
+        )
     )
     
-    # Mit Radien abrunden
-    edges = groove_box.Edges
-    edge_list = [e for e in edges if e.BoundBox.ZMax > base_height + fin_rail_height - 2]
+    # Hintere Führungsleiste
+    guide_rear = Part.makeBox(
+        guide_length,
+        fin_box_wall_thickness,
+        guide_height,
+        Vector(
+            box_center_x + (fin_box_length - guide_length) / 2.0,
+            box_center_y + fin_box_width - fin_box_wall_thickness + 1.0,
+            base_thickness + fin_box_bottom_thickness
+        )
+    )
     
-    if edge_list:
-        groove_box = groove_box.makeFillet(1.0, edge_list)
-    
-    return groove_box
+    # Kombiniere beide Guides
+    guides = guide_front.fuse(guide_rear)
+    return guides
 
-def create_security_pin_hole(doc):
-    """Erstelle das Loch für den Sicherungspin"""
+def create_security_pin_hole():
+    """Erstelle das Loch für den Sicherungsstift"""
     print("  → Erstelle Security-Pin-Loch...")
     
-    mount_x_center = base_length_along_board / 2.0
-    mount_y_center = base_width_cross_board / 2.0
+    # Pin-Loch quer durch den Kasten
+    pin_radius = (security_pin_diameter + print_tolerance) / 2.0
     
-    pin_hole_radius = (security_pin_diameter + printing_tolerance) / 2.0
-    pin_hole_depth = fin_rail_width + 2 * fin_mount_wall_thickness + 2.0
+    box_center_x = (base_length - fin_box_length) / 2.0
+    box_center_y = (base_width - fin_box_width) / 2.0
     
-    pin_x = mount_x_center - fin_rail_length/2.0 + security_pin_pos_from_front
-    pin_y = mount_y_center
+    # Position des Pin-Lochs
+    pin_x = box_center_x + (fin_box_length - fin_rail_length) / 2.0 + security_pin_pos_from_front
+    pin_y_center = box_center_y + fin_box_width / 2.0
+    pin_z = base_thickness + fin_box_height / 2.0
     
+    # Zylinder quer durch (Y-Richtung)
     pin_hole = Part.makeCylinder(
-        pin_hole_radius,
-        pin_hole_depth,
-        Vector(pin_x - pin_hole_depth/2.0, pin_y, base_height + fin_rail_height/2.0),
-        Vector(1, 0, 0)
+        pin_radius,
+        fin_box_width + 2.0,
+        Vector(pin_x, pin_y_center - fin_box_width / 2.0 - 1.0, pin_z),
+        Vector(0, 1, 0)  # Längs Y-Achse
     )
     
     return pin_hole
 
-def create_strap_slots(doc):
-    """Erstelle die beiden Gurtführungsschlitze"""
-    print("  → Erstelle Gurtführungs-Schlitze...")
+def create_strap_slots():
+    """Erstelle die beiden Gurtführungsschlitze in der Base"""
+    print("  → Erstelle Gurtschlitze...")
+    
+    slots = []
     
     # Vorderer Gurtschlitz
     front_slot = Part.makeBox(
         strap_slot_width,
-        base_width_cross_board + 4.0,
-        strap_slot_height,
-        Vector(strap_position_front - strap_slot_width/2.0,
-               -2.0,
-               base_height - strap_slot_height)
+        base_width + 4.0,
+        strap_slot_depth,
+        Vector(
+            strap_front_pos - strap_slot_width / 2.0,
+            -2.0,
+            base_thickness - strap_slot_depth
+        )
     )
     
     # Mit Radien abrunden
-    edges_front = front_slot.Edges
-    front_slot = front_slot.makeFillet(strap_slot_corner_radius, edges_front[:4])
+    edges = front_slot.Edges
+    if edges and strap_slot_radius > 0:
+        try:
+            front_slot = front_slot.makeFillet(strap_slot_radius, edges[:4])
+        except:
+            pass
+    
+    slots.append(front_slot)
     
     # Hinterer Gurtschlitz
     rear_slot = Part.makeBox(
         strap_slot_width,
-        base_width_cross_board + 4.0,
-        strap_slot_height,
-        Vector(strap_position_rear - strap_slot_width/2.0,
-               -2.0,
-               base_height - strap_slot_height)
+        base_width + 4.0,
+        strap_slot_depth,
+        Vector(
+            strap_rear_pos - strap_slot_width / 2.0,
+            -2.0,
+            base_thickness - strap_slot_depth
+        )
     )
     
-    edges_rear = rear_slot.Edges
-    rear_slot = rear_slot.makeFillet(strap_slot_corner_radius, edges_rear[:4])
+    edges = rear_slot.Edges
+    if edges and strap_slot_radius > 0:
+        try:
+            rear_slot = rear_slot.makeFillet(strap_slot_radius, edges[:4])
+        except:
+            pass
     
-    combined_slots = front_slot.fuse(rear_slot)
-    return combined_slots
+    slots.append(rear_slot)
+    
+    # Kombiniere beide Schlitze
+    combined = slots[0].fuse(slots[1])
+    return combined
 
-def create_reinforcement_ribs(doc):
-    """Erstelle dreieckige Verstärkungsrippen"""
+def create_reinforcement_ribs():
+    """Erstelle Verstärkungsrippen"""
     print("  → Erstelle Verstärkungsrippen...")
     
-    mount_x_center = base_length_along_board / 2.0
-    mount_y_center = base_width_cross_board / 2.0
+    box_center_y = (base_width - fin_box_width) / 2.0
     
-    # Vordere Rib
-    rib_y_pos = mount_y_center - fin_rail_width/2.0 - rib_thickness
+    # Rippe vorne (vor dem Kasten)
     rib_front = Part.makeBox(
+        rib_thickness * 3.0,
         rib_thickness * 2.0,
-        rib_thickness,
         rib_height,
-        Vector(mount_x_center - rib_thickness, rib_y_pos, base_height)
+        Vector(
+            (base_length - rib_thickness * 3.0) / 2.0,
+            box_center_y - rib_thickness * 2.0,
+            base_thickness
+        )
     )
     
-    # Hintere Rib
-    rib_y_pos_rear = mount_y_center + fin_rail_width/2.0 + rib_thickness
+    # Rippe hinten
     rib_rear = Part.makeBox(
+        rib_thickness * 3.0,
         rib_thickness * 2.0,
-        rib_thickness,
         rib_height,
-        Vector(mount_x_center - rib_thickness, rib_y_pos_rear - rib_thickness, base_height)
+        Vector(
+            (base_length - rib_thickness * 3.0) / 2.0,
+            box_center_y + fin_box_width,
+            base_thickness
+        )
     )
     
-    combined_ribs = rib_front.fuse(rib_rear)
-    return combined_ribs
+    ribs = rib_front.fuse(rib_rear)
+    return ribs
 
-def create_complete_assembly(doc):
-    """Assembliere alle Teile zu einem kompletten Mount"""
-    print("  → Assembliere alle Teile...")
+# =============================================================================
+# ======================== HAUPTASSEMBLY ====================================
+# =============================================================================
+
+def create_complete_assembly():
+    """Assembliere alle Teile"""
+    print("  → Assembliere Teile...")
     
-    # Erstelle alle Shapes
-    base = create_base_plate(doc)
-    fin_shell = create_fin_mount_shell(doc)
-    fin_groove = create_fin_slot_groove(doc)
-    pin_hole = create_security_pin_hole(doc)
-    strap_slots = create_strap_slots(doc)
-    ribs = create_reinforcement_ribs(doc)
+    # Einzelne Shapes erstellen
+    base = create_base_plate()
+    fin_box = create_fin_box_shell()
+    guides = create_fin_guides()
+    pin_hole = create_security_pin_hole()
+    strap_slots = create_strap_slots()
+    ribs = create_reinforcement_ribs()
     
-    # Kombiniere Base + Shell + Ribs
-    print("  → Verschmelze Base mit Finnenaufnahme...")
-    base_with_shell = base.fuse(fin_shell)
+    # Step 1: Base + Fin Box + Guides + Ribs (alle addieren)
+    print("  → Verschmelze Base mit Finnenkasten...")
+    result = base.fuse(fin_box)
     
-    print("  → Verschmelze mit Verstärkungsrippen...")
-    base_with_shell_ribs = base_with_shell.fuse(ribs)
+    print("  → Füge Führungsleisten hinzu...")
+    result = result.fuse(guides)
     
-    # Subtrahiere Löcher
-    print("  → Schneide Finnen-Nut...")
-    result = base_with_shell_ribs.cut(fin_groove)
+    print("  → Füge Verstärkungsrippen hinzu...")
+    result = result.fuse(ribs)
     
+    # Step 2: Schneidet Löcher raus
     print("  → Schneide Security-Pin-Loch...")
     result = result.cut(pin_hole)
     
@@ -291,90 +345,94 @@ def create_complete_assembly(doc):
 # =============================================================================
 
 def main():
-    """Hauptfunktion: Erstelle das komplette Modell"""
+    """Hauptfunktion"""
     
     print("=" * 70)
-    print("FreeCAD Macro: Strap-Mounted Slide-In Center Fin Mount")
+    print("FreeCAD Macro: Strap-Mounted Slide-In Fin Box")
     print("=" * 70)
     print()
     
-    # Erstelle Dokument
     doc = create_document()
     print("✓ Dokument erstellt")
     print()
     
-    # Erstelle Assembly
     print("Erstelle 3D-Modell...")
-    final_shape = create_complete_assembly(doc)
+    assembly_shape = create_complete_assembly()
     
-    # Erstelle sichtbares Objekt
-    print("  → Erstelle sichtbares Objekt...")
-    final_obj = doc.addObject("Part::Feature", "CenterfintMount")
-    final_obj.Shape = final_shape
-    final_obj.Label = "Strap-Mounted Slide-In Center Fin Mount"
+    print("  → Konvertiere zu sichtbarem Objekt...")
+    final_obj = doc.addObject("Part::Feature", "FinBoxMount")
+    final_obj.Shape = assembly_shape
+    final_obj.Label = "Strap-Mounted Slide-In Fin Box"
     
-    # Mache es sichtbar
+    # Sichtbarkeit
     final_obj.Visibility = True
     final_obj.ViewObject.Visibility = True
     final_obj.ViewObject.DisplayMode = 'Flat Lines'
     
     doc.recompute()
-    print("✓ Modell erstellt und sichtbar gemacht!")
+    print("✓ Modell erstellt!")
     print()
     
-    # Zeige Parameter
+    # Parameter anzeigen
     print("=" * 70)
-    print("PARAMETRISCHE MASSE (änderbar im Quellcode)")
+    print("PARAMETRISCHE MASSE")
     print("=" * 70)
-    print(f"Fin Rail Length:           {fin_rail_length} mm")
-    print(f"Fin Rail Width:            {fin_rail_width} mm")
-    print(f"Fin Rail Height:           {fin_rail_height} mm")
-    print(f"Fin Top Groove Width:      {fin_top_groove_width} mm (EXACT!)")
-    print()
-    print(f"Base Length (along board): {base_length_along_board} mm")
-    print(f"Base Width (cross board):  {base_width_cross_board} mm")
-    print(f"Base Height:               {base_height} mm")
-    print()
-    print(f"Strap Slot Width:          {strap_slot_width} mm")
-    print(f"Strap Slot Height:         {strap_slot_height} mm")
-    print(f"Front Strap Position:      {strap_position_front} mm")
-    print(f"Rear Strap Position:       {strap_position_rear} mm")
-    print()
-    print(f"Security Pin Diameter:     {security_pin_diameter} mm")
-    print(f"Security Pin Position:     {security_pin_pos_from_front} mm (from front)")
-    print()
-    print(f"Base Wall Thickness (ABS): {base_wall_thickness} mm")
-    print(f"Fin Mount Wall (ABS):      {fin_mount_wall_thickness} mm")
-    print(f"Rib Thickness (ABS):       {rib_thickness} mm")
+    print(f"\n🔧 FIN RAIL (Finne-Schiene):")
+    print(f"   Länge:        {fin_rail_length} mm")
+    print(f"   Breite:       {fin_rail_width} mm")
+    print(f"   Höhe:         {fin_rail_height} mm")
+    print(f"   Top Groove:   {fin_rail_top_width} mm (EXAKT)")
+    
+    print(f"\n📦 FIN BOX (Kasten):")
+    print(f"   Länge:        {fin_box_length} mm")
+    print(f"   Breite:       {fin_box_width} mm")
+    print(f"   Höhe:         {fin_box_height} mm")
+    print(f"   Wandstärke:   {fin_box_wall_thickness} mm")
+    print(f"   Boden:        {fin_box_bottom_thickness} mm")
+    
+    print(f"\n📍 BASE (Auflageplatte):")
+    print(f"   Länge:        {base_length} mm")
+    print(f"   Breite:       {base_width} mm")
+    print(f"   Dicke:        {base_thickness} mm")
+    
+    print(f"\n🔐 SECURITY PIN:")
+    print(f"   Durchmesser:  {security_pin_diameter} mm")
+    print(f"   Position:     {security_pin_pos_from_front} mm (von vorne)")
+    
+    print(f"\n🎀 GURTFÜHRUNGEN:")
+    print(f"   Gurt-Breite:  {strap_width} mm")
+    print(f"   Schlitz:      {strap_slot_width} mm")
+    print(f"   Tiefe:        {strap_slot_depth} mm")
+    print(f"   Vorne:        {strap_front_pos} mm")
+    print(f"   Hinten:       {strap_rear_pos} mm")
+    
     print()
     print("=" * 70)
-    print("EXPORT INSTRUCTIONS")
+    print("EXPORT & DRUCK")
     print("=" * 70)
-    print("1. Im Model Tree (links): Objekt 'CenterfintMount' Rechtsklick")
-    print("2. 'Export as STL' wählen")
-    print("3. Oder: File → Export as STL")
+    print("1. Modell im Viewport anschauen")
+    print("2. Objekt 'FinBoxMount' rechtsklick → 'Export as STL'")
+    print("3. STL in deinen Slicer importieren")
     print()
-    print("DRUCKEINSTELLUNGEN (ABS/FDM):")
-    print("- Nozzle: 240-250°C")
-    print("- Bed: 100-110°C")
-    print("- Infill: 20-25%")
-    print("- Wall Thickness: 4-5 (entspricht 5-7mm mit 0.4mm Nozzle)")
-    print("- Print Speed: 40-50 mm/s (für Präzision)")
-    print("- Support: Leicht (z.B. Tree Supports)")
+    print("📋 ABS-DRUCKEINSTELLUNGEN:")
+    print("   • Nozzle: 240-250°C")
+    print("   • Bed: 100-110°C")
+    print("   • Infill: 20-25%")
+    print("   • Walls: 4-5 (≈ 5-7mm)")
+    print("   • Speed: 40-50 mm/s")
+    print("   • Support: Ja (Tree Supports)")
     print()
     print("=" * 70)
     
-    # Fit View
+    # View anpassen
     try:
         Gui.activeDocument().resetEdit()
         Gui.SendMsgToActiveView("ViewFitAll")
-        print("✓ Ansicht angepasst")
+        print("✓ Ansicht angepasst (View Fit All)")
     except:
-        print("⚠ Ansicht konnte nicht automatisch angepasst werden")
-        print("  → Drücke 'V' dann 'F' für Fit All")
+        print("⚠ Ansicht konnte nicht angepasst werden (drücke V → F)")
     
-    print("✓ Fertig! Modell ist bereit für den Export.")
+    print("\n✅ FERTIG! Modell ist bereit zum Export.")
 
-# Starte Makro
 if __name__ == "__main__":
     main()
