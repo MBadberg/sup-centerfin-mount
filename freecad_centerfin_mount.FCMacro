@@ -62,7 +62,10 @@ def macro_dir():
     path = globals().get("__file__", "")
     if path:
         return os.path.dirname(os.path.abspath(path))
-    return os.getcwd()
+    try:
+        return App.getUserMacroDir(True)
+    except Exception:
+        return os.getcwd()
 
 
 def create_document(name):
@@ -115,6 +118,8 @@ def ensure_long_axis_z(shape):
     aligned = shape.copy()
     if longest == "X":
         aligned.rotate(Vector(0, 0, 0), Vector(0, 1, 0), 90)
+    elif longest == "Y":
+        aligned.rotate(Vector(0, 0, 0), Vector(1, 0, 0), -90)
     return aligned
 
 
@@ -264,7 +269,11 @@ def build_ribs(shell_shape, base_shape):
     )
 
     ribs = left_rib.fuse(right_rib).fuse(back_rib)
-    return safe_fillet(ribs, 2.0)
+    return safe_fillet(
+        ribs,
+        2.0,
+        lambda edge: edge.BoundBox.ZMax > base_thickness + 0.01,
+    )
 
 
 def build_pin_hole(shell_shape, cavity_shape):
@@ -301,25 +310,31 @@ def build_strap_slots(base_shape):
 stl_path = find_fin_stl()
 fin_solid = orient_fin(load_fin_solid(stl_path))
 fin_cavity = expand_for_clearance(fin_solid)
-
-fin_bbox = fin_cavity.BoundBox
+fin_cavity_box = fin_cavity.BoundBox
 fin_cavity = translated_copy(
     fin_cavity,
-    Vector(shell_wall, 0, base_thickness + shell_bottom_wall),
+    Vector(
+        shell_wall - fin_cavity_box.XMin,
+        -fin_cavity_box.YMin,
+        (base_thickness + shell_bottom_wall) - fin_cavity_box.ZMin,
+    ),
 )
+fin_bbox = fin_cavity.BoundBox
 
 print("Erzeuge Negativ-Halter aus realer Finnenform...")
 holder_shell = build_negative_holder(fin_cavity)
+holder_box = holder_shell.BoundBox
 holder_shell = safe_fillet(
     holder_shell,
     outer_fillet,
-    lambda edge: edge.BoundBox.YMin >= holder_shell.BoundBox.YMax - shell_back_wall - 0.01,
+    lambda edge: edge.BoundBox.YMin >= holder_box.YMax - shell_back_wall - 0.01,
 )
 
+holder_box = holder_shell.BoundBox
 opening_blend = safe_fillet(
     holder_shell,
     opening_fillet,
-    lambda edge: abs(edge.BoundBox.YMin - holder_shell.BoundBox.YMin) < 0.01,
+    lambda edge: abs(edge.BoundBox.YMin - holder_box.YMin) < 0.01,
 )
 holder_shell = opening_blend
 
@@ -355,7 +370,7 @@ if Gui is not None:
     try:
         part_obj.ViewObject.DisplayMode = "Flat Lines"
         part_obj.ViewObject.ShapeColor = (0.20, 0.45, 0.85)
-        Gui.SendMsgToActiveView("ViewFit")
+        Gui.SendMsgToActiveView("ViewFitAll")
     except Exception as exc:
         print("  ⚠ Ansicht konnte nicht angepasst werden: %s" % exc)
 
