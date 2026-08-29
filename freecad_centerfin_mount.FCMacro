@@ -25,7 +25,7 @@ print("=" * 75 + "\n")
 # Parameter
 # -----------------------------------------------------------------------------
 
-fin_stl_path = ""
+fin_stl_path = ""  # Optional absolute path to the downloaded Thingiverse STL.
 mesh_tolerance = 0.10
 fit_clearance = 0.35
 
@@ -137,8 +137,9 @@ def find_fin_stl():
     search_root = macro_dir()
     candidates = []
     for name in os.listdir(search_root):
-        if name.lower().endswith(".stl"):
-            candidates.append(os.path.join(search_root, name))
+        candidate = os.path.join(search_root, name)
+        if name.lower().endswith(".stl") and os.path.isfile(candidate):
+            candidates.append(candidate)
 
     if len(candidates) == 1:
         print("✓ STL automatisch gefunden: %s" % candidates[0])
