@@ -234,9 +234,9 @@ def build_base(shell_shape):
     )
 
 
-def build_ribs(shell_shape):
+def build_ribs(shell_shape, base_shape):
     shell_box = shell_shape.BoundBox
-    base_box = final_base.BoundBox
+    base_box = base_shape.BoundBox
 
     left_rib = Part.makeBox(
         rib_width,
@@ -324,7 +324,7 @@ opening_blend = safe_fillet(
 holder_shell = opening_blend
 
 final_base = build_base(holder_shell)
-ribs = build_ribs(holder_shell)
+ribs = build_ribs(holder_shell, final_base)
 pin_hole = build_pin_hole(holder_shell, fin_cavity)
 strap_slots = build_strap_slots(final_base)
 
@@ -346,7 +346,8 @@ part_obj.Label = "SUP Fin Negative Holder"
 reference_obj = doc.addObject("Part::Feature", "ReferenceFin")
 reference_obj.Shape = fin_cavity
 reference_obj.Label = "Reference Fin Cavity"
-reference_obj.ViewObject.Visibility = False
+if Gui is not None:
+    reference_obj.ViewObject.Visibility = False
 
 doc.recompute()
 
