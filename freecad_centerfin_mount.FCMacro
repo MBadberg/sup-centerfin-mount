@@ -307,81 +307,86 @@ def build_strap_slots(base_shape):
 # Build
 # -----------------------------------------------------------------------------
 
-stl_path = find_fin_stl()
-fin_solid = orient_fin(load_fin_solid(stl_path))
-fin_cavity = expand_for_clearance(fin_solid)
-fin_cavity_box = fin_cavity.BoundBox
-fin_cavity = translated_copy(
-    fin_cavity,
-    Vector(
-        shell_wall - fin_cavity_box.XMin,
-        -fin_cavity_box.YMin,
-        (base_thickness + shell_bottom_wall) - fin_cavity_box.ZMin,
-    ),
-)
-fin_bbox = fin_cavity.BoundBox
+def run():
+    stl_path = find_fin_stl()
+    doc = create_document("FinNegativeHolder")
 
-print("Erzeuge Negativ-Halter aus realer Finnenform...")
-holder_shell = build_negative_holder(fin_cavity)
-holder_box = holder_shell.BoundBox
-holder_shell = safe_fillet(
-    holder_shell,
-    outer_fillet,
-    lambda edge: edge.BoundBox.YMin >= holder_box.YMax - shell_back_wall - 0.01,
-)
+    fin_solid = orient_fin(load_fin_solid(stl_path))
+    fin_cavity = expand_for_clearance(fin_solid)
+    fin_cavity_box = fin_cavity.BoundBox
+    fin_cavity = translated_copy(
+        fin_cavity,
+        Vector(
+            shell_wall - fin_cavity_box.XMin,
+            -fin_cavity_box.YMin,
+            (base_thickness + shell_bottom_wall) - fin_cavity_box.ZMin,
+        ),
+    )
+    fin_bbox = fin_cavity.BoundBox
 
-holder_box = holder_shell.BoundBox
-opening_blend = safe_fillet(
-    holder_shell,
-    opening_fillet,
-    lambda edge: abs(edge.BoundBox.YMin - holder_box.YMin) < 0.01,
-)
-holder_shell = opening_blend
+    print("Erzeuge Negativ-Halter aus realer Finnenform...")
+    holder_shell = build_negative_holder(fin_cavity)
+    holder_box = holder_shell.BoundBox
+    holder_shell = safe_fillet(
+        holder_shell,
+        outer_fillet,
+        lambda edge: edge.BoundBox.YMin >= holder_box.YMax - shell_back_wall - 0.01,
+    )
 
-final_base = build_base(holder_shell)
-ribs = build_ribs(holder_shell, final_base)
-pin_hole = build_pin_hole(holder_shell, fin_cavity)
-strap_slots = build_strap_slots(final_base)
+    holder_box = holder_shell.BoundBox
+    holder_shell = safe_fillet(
+        holder_shell,
+        opening_fillet,
+        lambda edge: abs(edge.BoundBox.YMin - holder_box.YMin) < 0.01,
+    )
 
-result = final_base.fuse(holder_shell).fuse(ribs)
-result = result.cut(pin_hole)
-result = result.cut(strap_slots)
+    final_base = build_base(holder_shell)
+    ribs = build_ribs(holder_shell, final_base)
+    pin_hole = build_pin_hole(holder_shell, fin_cavity)
+    strap_slots = build_strap_slots(final_base)
+
+    result = final_base.fuse(holder_shell).fuse(ribs)
+    result = result.cut(pin_hole)
+    result = result.cut(strap_slots)
+
+    part_obj = doc.addObject("Part::Feature", "FinNegativeHolder")
+    part_obj.Shape = result
+    part_obj.Label = "SUP Fin Negative Holder"
+
+    reference_obj = doc.addObject("Part::Feature", "ReferenceFin")
+    reference_obj.Shape = fin_cavity
+    reference_obj.Label = "Reference Fin Cavity"
+    if Gui is not None:
+        reference_obj.ViewObject.Visibility = False
+
+    doc.recompute()
+
+    if Gui is not None:
+        try:
+            part_obj.ViewObject.DisplayMode = "Flat Lines"
+            part_obj.ViewObject.ShapeColor = (0.20, 0.45, 0.85)
+            Gui.SendMsgToActiveView("ViewFitAll")
+        except Exception as exc:
+            print("  ⚠ Ansicht konnte nicht angepasst werden: %s" % exc)
+
+    print("\n" + "=" * 75)
+    print("  PARAMETER")
+    print("=" * 75)
+    print("STL: %s" % stl_path)
+    print("Fit clearance: %.2f mm" % fit_clearance)
+    print("Pin hole diameter: %.2f mm" % pin_hole_diameter)
+    print("Strap slot size: %.2f x %.2f mm" % (strap_slot_length, strap_slot_width))
+    print("Fin bounding box: %.2f x %.2f x %.2f mm" % (fin_bbox.XLength, fin_bbox.YLength, fin_bbox.ZLength))
+    print("✓ Fertig: Negativ-Halter erzeugt und im Dokument angezeigt.")
+    print("=" * 75 + "\n")
 
 
-# -----------------------------------------------------------------------------
-# Document objects
-# -----------------------------------------------------------------------------
-
-doc = create_document("FinNegativeHolder")
-
-part_obj = doc.addObject("Part::Feature", "FinNegativeHolder")
-part_obj.Shape = result
-part_obj.Label = "SUP Fin Negative Holder"
-
-reference_obj = doc.addObject("Part::Feature", "ReferenceFin")
-reference_obj.Shape = fin_cavity
-reference_obj.Label = "Reference Fin Cavity"
-if Gui is not None:
-    reference_obj.ViewObject.Visibility = False
-
-doc.recompute()
-
-if Gui is not None:
+try:
+    run()
+except Exception as exc:
+    message = "FinNegativeHolder fehlgeschlagen: %s\n" % exc
+    print("❌ " + message)
     try:
-        part_obj.ViewObject.DisplayMode = "Flat Lines"
-        part_obj.ViewObject.ShapeColor = (0.20, 0.45, 0.85)
-        Gui.SendMsgToActiveView("ViewFitAll")
-    except Exception as exc:
-        print("  ⚠ Ansicht konnte nicht angepasst werden: %s" % exc)
-
-
-print("\n" + "=" * 75)
-print("  PARAMETER")
-print("=" * 75)
-print("STL: %s" % stl_path)
-print("Fit clearance: %.2f mm" % fit_clearance)
-print("Pin hole diameter: %.2f mm" % pin_hole_diameter)
-print("Strap slot size: %.2f x %.2f mm" % (strap_slot_length, strap_slot_width))
-print("Fin bounding box: %.2f x %.2f x %.2f mm" % (fin_bbox.XLength, fin_bbox.YLength, fin_bbox.ZLength))
-print("✓ Fertig: Negativ-Halter erzeugt und im Dokument angezeigt.")
-print("=" * 75 + "\n")
+        App.Console.PrintError(message)
+    except Exception:
+        pass
