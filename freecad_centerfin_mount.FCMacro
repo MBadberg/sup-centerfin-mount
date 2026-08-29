@@ -4,13 +4,13 @@
 # Material: ABS (FDM 3D-Druck)
 # Purpose: Generate complete 3D model for 3D-printing
 # Author: Copilot
+# BUGFIX: Sichtbarkeit und korrekte Shape-Konvertierung
 # =============================================================================
 
 import FreeCAD as App
 import FreeCADGui as Gui
 from FreeCAD import Vector
 import Part
-import Draft
 
 # =============================================================================
 # ======================== PARAMETRISCHE MASSE ==============================
@@ -69,34 +69,12 @@ def create_document():
     doc = App.newDocument("CenterfintMount")
     return doc
 
-def fuse_objects(doc, objects, name):
-    """Vereinige mehrere Objekte"""
-    if len(objects) == 0:
-        return None
-    if len(objects) == 1:
-        return objects[0]
-    
-    result = objects[0]
-    for obj in objects[1:]:
-        fused = doc.addObject("Part::Boolean", f"Fuse_{name}_{objects.index(obj)}")
-        fused.Base = result
-        fused.Tool = obj
-        fused.Operation = 0  # Union
-        doc.recompute()
-        result = fused
-    return result
-
-def cut_objects(doc, base, tools, name):
-    """Subtrahiere mehrere Objekte von Base"""
-    result = base
-    for i, tool in enumerate(tools):
-        cut = doc.addObject("Part::Boolean", f"Cut_{name}_{i}")
-        cut.Base = result
-        cut.Tool = tool
-        cut.Operation = 1  # Difference
-        doc.recompute()
-        result = cut
-    return result
+def make_shape_visible(obj):
+    """Mache ein Objekt sichtbar und setze Properties"""
+    obj.Visibility = True
+    if hasattr(obj, 'ViewObject'):
+        obj.ViewObject.Visibility = True
+    return obj
 
 # =============================================================================
 # ======================== GEOMETRIE-ERSTELLUNG ============================
@@ -104,6 +82,8 @@ def cut_objects(doc, base, tools, name):
 
 def create_base_plate(doc):
     """Erstelle die Basis-Platte mit abgerundeten Ecken"""
+    print("  → Erstelle Base-Platte...")
+    
     # Rechteck mit abgerundeten Ecken
     base_box = Part.makeBox(
         base_length_along_board,
@@ -112,39 +92,31 @@ def create_base_plate(doc):
         Vector(0, 0, 0)
     )
     
-    # Ecken abrunden (Chamfer)
-    base_shape = base_box
-    edges = base_shape.Edges
-    
-    # Finde die oberen Kanten
+    # Ecken oben abrunden
+    edges = base_box.Edges
     edge_list = []
     for edge in edges:
-        # Nur obere Kanten (Z > base_height - 1)
         if edge.BoundBox.ZMax > base_height - 1:
             edge_list.append(edge)
     
     if edge_list:
-        base_shape = base_shape.makeFillet(base_corner_radius, edge_list)
+        base_shape = base_box.makeFillet(base_corner_radius, edge_list)
+    else:
+        base_shape = base_box
     
-    obj = doc.addObject("Part::FeaturePython", "Baseplate")
-    obj.Shape = base_shape
-    obj.Label = "Base Plate"
-    return obj
+    return base_shape
 
 def create_fin_mount_shell(doc):
     """Erstelle die Finnenaufnahme-Schale"""
+    print("  → Erstelle Finnenaufnahme...")
     
-    # Äußere Geometrie der Finnenaufnahme
-    # Länge: fin_rail_length + 10mm Überstand an beiden Seiten
     outer_length = fin_rail_length + 6.0
     outer_width = fin_rail_width + 2 * fin_mount_wall_thickness
-    outer_height = fin_rail_height + 2.0  # Mit Deckel
+    outer_height = fin_rail_height + 2.0
     
-    # Mittelpunkt auf der Base
     mount_x_center = base_length_along_board / 2.0
     mount_y_center = base_width_cross_board / 2.0
     
-    # Äußerer Kasten
     outer_box = Part.makeBox(
         outer_length,
         outer_width,
@@ -154,7 +126,6 @@ def create_fin_mount_shell(doc):
                base_height)
     )
     
-    # Innerer Kasten (wird ausgehöhlt)
     inner_length = fin_rail_length
     inner_width = fin_rail_width + fin_insertion_play
     inner_height = fin_rail_height + 1.0
@@ -168,21 +139,16 @@ def create_fin_mount_shell(doc):
                base_height + 1.0)
     )
     
-    # Schale durch Subtraktion
     shell = outer_box.cut(inner_box)
-    
-    obj = doc.addObject("Part::FeaturePython", "FinMountShell")
-    obj.Shape = shell
-    obj.Label = "Fin Mount Shell"
-    return obj
+    return shell
 
 def create_fin_slot_groove(doc):
     """Erstelle die Führungsnut für die Finnenaufnahme"""
+    print("  → Erstelle Finnen-Führungsnut...")
     
     mount_x_center = base_length_along_board / 2.0
     mount_y_center = base_width_cross_board / 2.0
     
-    # Rechteckige Nut für die Finne
     groove_length = fin_rail_length
     groove_width = fin_top_groove_width + fin_insertion_play
     groove_depth = 3.0
@@ -203,41 +169,33 @@ def create_fin_slot_groove(doc):
     if edge_list:
         groove_box = groove_box.makeFillet(1.0, edge_list)
     
-    obj = doc.addObject("Part::FeaturePython", "FinSlotGroove")
-    obj.Shape = groove_box
-    obj.Label = "Fin Slot Groove"
-    return obj
+    return groove_box
 
 def create_security_pin_hole(doc):
     """Erstelle das Loch für den Sicherungspin"""
+    print("  → Erstelle Security-Pin-Loch...")
     
     mount_x_center = base_length_along_board / 2.0
     mount_y_center = base_width_cross_board / 2.0
     
-    # Pin-Loch
     pin_hole_radius = (security_pin_diameter + printing_tolerance) / 2.0
     pin_hole_depth = fin_rail_width + 2 * fin_mount_wall_thickness + 2.0
     
-    # Position des Pins: von vorne der Finnenaufnahme
     pin_x = mount_x_center - fin_rail_length/2.0 + security_pin_pos_from_front
     pin_y = mount_y_center
     
-    # Zylinder für das Pin-Loch (quer durch die Finnenaufnahme)
     pin_hole = Part.makeCylinder(
         pin_hole_radius,
         pin_hole_depth,
         Vector(pin_x - pin_hole_depth/2.0, pin_y, base_height + fin_rail_height/2.0),
-        Vector(1, 0, 0)  # Längs zur Finnenaufnahme
+        Vector(1, 0, 0)
     )
     
-    obj = doc.addObject("Part::FeaturePython", "SecurityPinHole")
-    obj.Shape = pin_hole
-    obj.Label = "Security Pin Hole"
-    return obj
+    return pin_hole
 
 def create_strap_slots(doc):
     """Erstelle die beiden Gurtführungsschlitze"""
-    slots = []
+    print("  → Erstelle Gurtführungs-Schlitze...")
     
     # Vorderer Gurtschlitz
     front_slot = Part.makeBox(
@@ -253,8 +211,6 @@ def create_strap_slots(doc):
     edges_front = front_slot.Edges
     front_slot = front_slot.makeFillet(strap_slot_corner_radius, edges_front[:4])
     
-    slots.append(front_slot)
-    
     # Hinterer Gurtschlitz
     rear_slot = Part.makeBox(
         strap_slot_width,
@@ -268,24 +224,17 @@ def create_strap_slots(doc):
     edges_rear = rear_slot.Edges
     rear_slot = rear_slot.makeFillet(strap_slot_corner_radius, edges_rear[:4])
     
-    slots.append(rear_slot)
-    
-    # Kombiniere beide Schlitze
-    combined_slots = slots[0].fuse(slots[1])
-    
-    obj = doc.addObject("Part::FeaturePython", "StrapSlots")
-    obj.Shape = combined_slots
-    obj.Label = "Strap Slots"
-    return obj
+    combined_slots = front_slot.fuse(rear_slot)
+    return combined_slots
 
 def create_reinforcement_ribs(doc):
     """Erstelle dreieckige Verstärkungsrippen"""
-    ribs = []
+    print("  → Erstelle Verstärkungsrippen...")
     
     mount_x_center = base_length_along_board / 2.0
     mount_y_center = base_width_cross_board / 2.0
     
-    # Vordere Rib (von Base zu Finnenaufnahme)
+    # Vordere Rib
     rib_y_pos = mount_y_center - fin_rail_width/2.0 - rib_thickness
     rib_front = Part.makeBox(
         rib_thickness * 2.0,
@@ -293,7 +242,6 @@ def create_reinforcement_ribs(doc):
         rib_height,
         Vector(mount_x_center - rib_thickness, rib_y_pos, base_height)
     )
-    ribs.append(rib_front)
     
     # Hintere Rib
     rib_y_pos_rear = mount_y_center + fin_rail_width/2.0 + rib_thickness
@@ -303,22 +251,15 @@ def create_reinforcement_ribs(doc):
         rib_height,
         Vector(mount_x_center - rib_thickness, rib_y_pos_rear - rib_thickness, base_height)
     )
-    ribs.append(rib_rear)
     
-    # Kombiniere Ribs
-    combined_ribs = ribs[0]
-    for rib in ribs[1:]:
-        combined_ribs = combined_ribs.fuse(rib)
-    
-    obj = doc.addObject("Part::FeaturePython", "ReinforcementRibs")
-    obj.Shape = combined_ribs
-    obj.Label = "Reinforcement Ribs"
-    return obj
+    combined_ribs = rib_front.fuse(rib_rear)
+    return combined_ribs
 
 def create_complete_assembly(doc):
     """Assembliere alle Teile zu einem kompletten Mount"""
+    print("  → Assembliere alle Teile...")
     
-    # Erstelle alle Komponenten
+    # Erstelle alle Shapes
     base = create_base_plate(doc)
     fin_shell = create_fin_mount_shell(doc)
     fin_groove = create_fin_slot_groove(doc)
@@ -326,44 +267,24 @@ def create_complete_assembly(doc):
     strap_slots = create_strap_slots(doc)
     ribs = create_reinforcement_ribs(doc)
     
-    # Kombiniere Base + Shell + Ribs (diese werden addiert)
-    base_with_shell = doc.addObject("Part::Boolean", "BaseWithShell")
-    base_with_shell.Base = base
-    base_with_shell.Tool = fin_shell
-    base_with_shell.Operation = 0  # Union
-    doc.recompute()
+    # Kombiniere Base + Shell + Ribs
+    print("  → Verschmelze Base mit Finnenaufnahme...")
+    base_with_shell = base.fuse(fin_shell)
     
-    base_with_shell_ribs = doc.addObject("Part::Boolean", "BaseWithShellAndRibs")
-    base_with_shell_ribs.Base = base_with_shell
-    base_with_shell_ribs.Tool = ribs
-    base_with_shell_ribs.Operation = 0  # Union
-    doc.recompute()
+    print("  → Verschmelze mit Verstärkungsrippen...")
+    base_with_shell_ribs = base_with_shell.fuse(ribs)
     
-    # Subtrahiere nun alle Löcher (Fin Groove, Pin Hole, Strap Slots)
-    result = doc.addObject("Part::Boolean", "CutFinGroove")
-    result.Base = base_with_shell_ribs
-    result.Tool = fin_groove
-    result.Operation = 1  # Difference
-    doc.recompute()
+    # Subtrahiere Löcher
+    print("  → Schneide Finnen-Nut...")
+    result = base_with_shell_ribs.cut(fin_groove)
     
-    result2 = doc.addObject("Part::Boolean", "CutPinHole")
-    result2.Base = result
-    result2.Tool = pin_hole
-    result2.Operation = 1  # Difference
-    doc.recompute()
+    print("  → Schneide Security-Pin-Loch...")
+    result = result.cut(pin_hole)
     
-    result3 = doc.addObject("Part::Boolean", "CutStrapSlots")
-    result3.Base = result2
-    result3.Tool = strap_slots
-    result3.Operation = 1  # Difference
-    doc.recompute()
+    print("  → Schneide Gurtschlitze...")
+    result = result.cut(strap_slots)
     
-    # Finale Shape
-    final_obj = doc.addObject("Part::FeaturePython", "CenterfintMountAssembly")
-    final_obj.Shape = result3.Shape
-    final_obj.Label = "Strap-Mounted Slide-In Center Fin Mount"
-    
-    return final_obj
+    return result
 
 # =============================================================================
 # ======================== HAUPTPROGRAMM ===================================
@@ -380,17 +301,25 @@ def main():
     # Erstelle Dokument
     doc = create_document()
     print("✓ Dokument erstellt")
+    print()
     
     # Erstelle Assembly
-    print("✓ Erstelle Base-Platte...")
-    print("✓ Erstelle Finnenaufnahme...")
-    print("✓ Erstelle Gurtschlitze...")
-    print("✓ Erstelle Verstärkungsrippen...")
+    print("Erstelle 3D-Modell...")
+    final_shape = create_complete_assembly(doc)
     
-    assembly = create_complete_assembly(doc)
+    # Erstelle sichtbares Objekt
+    print("  → Erstelle sichtbares Objekt...")
+    final_obj = doc.addObject("Part::Feature", "CenterfintMount")
+    final_obj.Shape = final_shape
+    final_obj.Label = "Strap-Mounted Slide-In Center Fin Mount"
+    
+    # Mache es sichtbar
+    final_obj.Visibility = True
+    final_obj.ViewObject.Visibility = True
+    final_obj.ViewObject.DisplayMode = 'Flat Lines'
+    
     doc.recompute()
-    
-    print("✓ Assembly komplett!")
+    print("✓ Modell erstellt und sichtbar gemacht!")
     print()
     
     # Zeige Parameter
@@ -421,9 +350,9 @@ def main():
     print("=" * 70)
     print("EXPORT INSTRUCTIONS")
     print("=" * 70)
-    print("1. Wähle das Objekt 'CenterfintMountAssembly'")
-    print("2. File → Export as STL")
-    print("3. Oder File → Export as STEP für weitere Bearbeitung")
+    print("1. Im Model Tree (links): Objekt 'CenterfintMount' Rechtsklick")
+    print("2. 'Export as STL' wählen")
+    print("3. Oder: File → Export as STL")
     print()
     print("DRUCKEINSTELLUNGEN (ABS/FDM):")
     print("- Nozzle: 240-250°C")
@@ -433,9 +362,16 @@ def main():
     print("- Print Speed: 40-50 mm/s (für Präzision)")
     print("- Support: Leicht (z.B. Tree Supports)")
     print()
+    print("=" * 70)
     
-    Gui.activeDocument().resetEdit()
-    Gui.SendMsgToActiveView("ViewFitAll")
+    # Fit View
+    try:
+        Gui.activeDocument().resetEdit()
+        Gui.SendMsgToActiveView("ViewFitAll")
+        print("✓ Ansicht angepasst")
+    except:
+        print("⚠ Ansicht konnte nicht automatisch angepasst werden")
+        print("  → Drücke 'V' dann 'F' für Fit All")
     
     print("✓ Fertig! Modell ist bereit für den Export.")
 
